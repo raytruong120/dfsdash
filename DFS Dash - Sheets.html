@@ -1,0 +1,651 @@
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cloud DFS Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @keyframes fade-in-up {
+          from { opacity: 0; transform: translate(-50%, 20px); }
+          to { opacity: 1; transform: translate(-50%, 0); }
+        }
+        .animate-fade-in-up {
+          animation: fade-in-up 0.3s ease-out forwards;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        .animate-spin {
+          animation: spin 1s linear infinite;
+        }
+    </style>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              'slate-800': '#1E293B',
+              'slate-900': '#0F172A',
+            },
+          },
+        },
+      }
+    </script>
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://aistudiocdn.com/react@^19.2.0",
+        "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+        "react/": "https://aistudiocdn.com/react@^19.2.0/"
+      }
+    }
+    </script>
+</head>
+<body class="bg-slate-900">
+    <div id="root"></div>
+    <script type="text/babel" data-type="module">
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+
+// --- React Hooks Destructuring ---
+const { useState, useMemo, useCallback, useRef, useEffect, StrictMode } = React;
+
+// --- Utility Functions ---
+const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+    }).format(amount);
+};
+const formatDate = (date) => {
+    if (!(date instanceof Date) || isNaN(date.getTime())) return 'Invalid Date';
+    // Use UTC methods to format the date to avoid timezone shifts
+    const year = date.getUTCFullYear();
+    const month = (date.getUTCMonth() + 1).toString().padStart(2, '0');
+    const day = date.getUTCDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+const getMonthName = (date) => {
+    if (!(date instanceof Date) || isNaN(date.getTime())) return 'Invalid Date';
+    return date.toLocaleString('default', { month: 'long', timeZone: 'UTC' });
+};
+const getTodayInLocalTime = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = (today.getMonth() + 1).toString().padStart(2, '0');
+    const day = today.getDate().toString().padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+// --- Icon Components ---
+const SortArrowsIcon = ({ className = 'w-4 h-4' }) => ( <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" /></svg> );
+const ArrowUpIcon = ({ className = 'w-4 h-4' }) => ( <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg> );
+const ArrowDownIcon = ({ className = 'w-4 h-4' }) => ( <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg> );
+const ChevronDownIcon = ({ className = "w-5 h-5" }) => ( <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" /></svg> );
+const PencilIcon = ({ className = "w-4 h-4" }) => ( <svg xmlns="http://www.w3.org/2000/svg" className={`${className} pointer-events-none`} viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd" /></svg> );
+const TrashIcon = ({ className = "w-4 h-4" }) => ( <svg xmlns="http://www.w3.org/2000/svg" className={`${className} pointer-events-none`} viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg> );
+
+// --- Services ---
+const googleSheetsService = {
+  parseSheetData: (data) => {
+    return data.slice(1).map(row => {
+        const id = Number(row[0]);
+        
+        const dateInput = row[1]; // from JSON
+        let date = new Date(NaN); // default to invalid
+        if (typeof dateInput === 'string' && dateInput) {
+            // If it's a full ISO string from a Date object in Sheets
+            if (dateInput.includes('T')) {
+                const parsed = new Date(dateInput);
+                if (!isNaN(parsed.getTime())) {
+                     // Standardize to midnight UTC of that date to remove time component
+                     date = new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+                }
+            } else if (dateInput.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                // It's a date string like 'YYYY-MM-DD'. Parse as UTC.
+                const parsed = new Date(`${dateInput}T00:00:00Z`);
+                 if (!isNaN(parsed.getTime())) {
+                    date = parsed;
+                }
+            }
+        }
+
+        const open = String(row[2]).toUpperCase() === 'TRUE';
+        const slip = String(row[3]);
+        const capper = String(row[4]);
+        const wager = Number(row[5]) || 0;
+        const win = Number(row[6]) || 0;
+        
+        return { id, date, open, slip, capper, wager, win, net: open ? 0 : win - wager };
+    }).filter(s => s.id);
+  },
+  getSheetData: async (appsScriptUrl) => {
+    const response = await fetch(appsScriptUrl);
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to fetch data from Google Sheets: ${errorText}`);
+    }
+    const { data } = await response.json();
+    return googleSheetsService.parseSheetData(data);
+  },
+  syncSheetData: async (appsScriptUrl, slips) => {
+    const sheetData = slips.map(s => [s.id, formatDate(s.date), s.open, s.slip, s.capper, s.wager, s.win]);
+    const response = await fetch(appsScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action: 'SYNC', payload: sheetData }),
+        mode: 'cors',
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to save data to Google Sheets: ${errorText}`);
+    }
+  }
+};
+
+// --- UI Components ---
+const StatCard = ({ title, value, valueColor = 'text-white' }) => (
+    <div className="bg-slate-800 rounded-lg p-4 shadow-lg flex flex-col">
+      <p className="text-sm text-gray-400">{title}</p>
+      <p className={`text-3xl font-bold mt-1 ${valueColor}`}>{value}</p>
+    </div>
+);
+
+const BettingTableRow = React.memo(({ slip, isSelected, onToggleSelection, onEdit, onRemove }) => (
+    <tr className={`hover:bg-slate-700/50 ${isSelected ? 'bg-blue-900/50' : ''}`}>
+        <td className="px-4 py-4 whitespace-nowrap text-sm text-center"><input type="checkbox" checked={isSelected} onChange={() => onToggleSelection(slip.id)} className="h-4 w-4 rounded bg-slate-800 border-slate-500 text-blue-600 focus:ring-blue-500 cursor-pointer"/></td>
+        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-300 text-center">{formatDate(slip.date)}</td>
+        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-300 text-center">{getMonthName(slip.date)}</td>
+        <td className="px-4 py-4 whitespace-nowrap text-sm text-center">{slip.open ? <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-500 text-yellow-900">Yes</span> : <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-600 text-gray-200">No</span>}</td>
+        <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-white text-center">{slip.slip}</td>
+        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-300 text-center">{slip.capper}</td>
+        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-300 text-center">{formatCurrency(slip.wager)}</td>
+        <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-300 text-center">{slip.open ? '—' : formatCurrency(slip.win)}</td>
+        <td className={`px-4 py-4 whitespace-nowrap text-sm font-bold text-center ${slip.open ? 'text-gray-300' : slip.net > 0 ? 'text-green-400' : slip.net < 0 ? 'text-red-400' : 'text-gray-300'}`}>{slip.open ? '—' : formatCurrency(slip.net)}</td>
+        <td className="px-4 py-4 whitespace-nowrap text-sm text-center">
+            <div className="flex items-center justify-center gap-x-4">
+                <button onClick={() => onEdit(slip)} className="text-blue-400 hover:text-blue-300" title="Edit Slip"><PencilIcon /></button>
+                <button onClick={() => onRemove(slip.id)} className="text-red-500 hover:text-red-400" title="Remove Slip"><TrashIcon /></button>
+            </div>
+        </td>
+    </tr>
+));
+
+const BettingTable = React.memo(({ slips, sortConfig, onSort, onEdit, onRemove, selectedSlipIds, onToggleSelection, onToggleSelectAll }) => {
+    const TableHeader = ({ label, sortKey, className }) => {
+        const isSorted = sortConfig?.key === sortKey;
+        const justification = className?.includes('text-center') ? 'justify-center' : className?.includes('text-right') ? 'justify-end' : 'justify-start';
+        return (
+            <th scope="col" className={`px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer select-none hover:bg-slate-700/50 ${className}`} onClick={() => onSort(sortKey)}>
+                <div className={`flex items-center gap-2 ${justification}`}>{label} {isSorted ? (sortConfig?.direction === 'ascending' ? <ArrowUpIcon /> : <ArrowDownIcon />) : (<SortArrowsIcon className="w-4 h-4 text-gray-500" />)}</div>
+            </th>
+        );
+    };
+    const areAllVisibleSelected = slips.length > 0 && slips.every(slip => selectedSlipIds.has(slip.id));
+    return (
+        <div className="bg-slate-800 rounded-lg shadow-lg overflow-hidden mt-6">
+            <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-700">
+                    <thead className="bg-slate-800"><tr>
+                        <th scope="col" className="px-4 py-3"><input type="checkbox" checked={areAllVisibleSelected} onChange={onToggleSelectAll} className="h-4 w-4 rounded bg-slate-800 border-slate-500 text-blue-600 focus:ring-blue-500 cursor-pointer" title="Select all visible"/></th>
+                        <TableHeader label="Date" sortKey="date" className="text-center" />
+                        <th scope="col" className="px-4 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">Month</th>
+                        <TableHeader label="Open?" sortKey="open" className="text-center" />
+                        <th scope="col" className="px-4 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider min-w-[200px]">Slip</th>
+                        <TableHeader label="Capper" sortKey="capper" className="text-center" />
+                        <TableHeader label="Wager" sortKey="wager" className="text-center" />
+                        <TableHeader label="Win" sortKey="win" className="text-center" />
+                        <TableHeader label="Net" sortKey="net" className="text-center" />
+                        <th scope="col" className="px-4 py-3 text-center text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
+                    </tr></thead>
+                    <tbody className="bg-slate-800/50 divide-y divide-slate-700">{slips.map((slip) => <BettingTableRow key={slip.id} slip={slip} isSelected={selectedSlipIds.has(slip.id)} onToggleSelection={onToggleSelection} onEdit={onEdit} onRemove={onRemove}/>)}</tbody>
+                </table>
+            </div>
+        </div>
+    );
+});
+
+const MultiSelectDropdown = ({ label, options, selectedOptions, onChange }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef(null);
+    useEffect(() => {
+        const handleClickOutside = (event) => { if (dropdownRef.current && !dropdownRef.current.contains(event.target)) setIsOpen(false); };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [dropdownRef]);
+    const handleOptionToggle = (option) => onChange(selectedOptions.includes(option) ? selectedOptions.filter(item => item !== option) : [...selectedOptions, option]);
+    const buttonText = selectedOptions.length === 0 ? `All ${label}` : selectedOptions.length === 1 ? selectedOptions[0] : `${selectedOptions.length} ${label} Selected`;
+    return (
+        <div className="relative" ref={dropdownRef}>
+            <button onClick={() => setIsOpen(!isOpen)} className="appearance-none bg-slate-700 border border-slate-600 rounded-md py-2 pl-3 pr-8 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 flex items-center justify-between min-w-[10rem]" type="button" aria-haspopup="listbox" aria-expanded={isOpen}><span className="truncate">{buttonText}</span><ChevronDownIcon className={`w-5 h-5 text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} /></button>
+            {isOpen && <div className="absolute z-10 mt-1 w-full bg-slate-700 border border-slate-600 rounded-md shadow-lg max-h-60 overflow-y-auto" role="listbox"><ul className="py-1"><li className="px-3 py-2 border-b border-slate-600"><button onClick={() => onChange([])} className="w-full text-left text-sm text-slate-300 hover:text-white transition-colors">Show All / Clear Selection</button></li>{options.map(option => <li key={option}><label className="flex items-center px-3 py-2 cursor-pointer hover:bg-slate-600 transition-colors"><input type="checkbox" checked={selectedOptions.includes(option)} onChange={() => handleOptionToggle(option)} className="h-4 w-4 rounded bg-slate-800 border-slate-500 text-blue-600 focus:ring-blue-500"/><span className="ml-3 text-slate-200 text-sm">{option}</span></label></li>)}</ul></div>}
+        </div>
+    );
+};
+
+const SlipEditorModal = ({ isOpen, onClose, onSave, slip, cappers = [] }) => {
+    const isEditMode = slip != null;
+    const [formData, setFormData] = useState({ id: null, date: getTodayInLocalTime(), open: true, slip: '', capper: '', wager: '', win: '0' });
+    const [suggestions, setSuggestions] = useState([]);
+
+    useEffect(() => {
+        if (isOpen) {
+            if (slip && slip.date instanceof Date && !isNaN(slip.date.getTime())) {
+                setFormData({ ...slip, date: formatDate(slip.date) });
+            } else if (slip) { // Handle case where slip exists but date is invalid
+                setFormData({ ...slip, date: getTodayInLocalTime() });
+            } else { // Handle new slip
+                setFormData({ id: null, date: getTodayInLocalTime(), open: true, slip: '', capper: '', wager: '', win: '0' });
+            }
+            setSuggestions([]);
+        }
+    }, [slip, isOpen]);
+
+    const handleChange = (e) => { const { name, value, type, checked } = e.target; setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value })); if (name === 'capper') setSuggestions(value ? cappers.filter(c => c.toLowerCase().startsWith(value.toLowerCase()) && c.toLowerCase() !== value.toLowerCase()) : []); };
+    const handleSuggestionClick = (suggestion) => { setFormData(prev => ({ ...prev, capper: suggestion })); setSuggestions([]); };
+    const handleKeyDown = (e) => { if (e.key === 'Tab' && suggestions.length === 1) { e.preventDefault(); handleSuggestionClick(suggestions[0]); } };
+    
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        const slipData = { ...formData, id: isEditMode ? formData.id : Date.now(), wager: parseFloat(String(formData.wager)) || 0, win: parseFloat(String(formData.win)) || 0, date: new Date(`${formData.date}T00:00:00Z`) };
+        onSave(slipData);
+        onClose();
+    };
+
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 transition-opacity" aria-modal="true" role="dialog">
+            <div className="bg-slate-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4 transform transition-all">
+                <h2 className="text-2xl font-bold text-white mb-6">{isEditMode ? 'Edit Slip' : 'Add New Slip'}</h2>
+                <form onSubmit={handleSubmit}><div className="space-y-4"><div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><div><label htmlFor="date" className="block text-sm font-medium text-slate-300">Date</label><input type="date" name="date" id="date" value={formData.date} onChange={handleChange} required className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"/></div><div className="flex items-end pb-2"><label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" name="open" checked={formData.open} onChange={handleChange} className="h-4 w-4 rounded bg-slate-700 border-slate-500 text-blue-600 focus:ring-blue-500"/><span className="text-sm font-medium text-slate-300">Is Open?</span></label></div></div><div><label htmlFor="slip" className="block text-sm font-medium text-slate-300">Slip</label><input type="text" name="slip" id="slip" value={formData.slip} onChange={handleChange} required className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"/></div><div><label htmlFor="capper" className="block text-sm font-medium text-slate-300">Capper</label><div className="relative"><input type="text" name="capper" id="capper" value={formData.capper} onChange={handleChange} onKeyDown={handleKeyDown} required className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500" autoComplete="off" onBlur={() => setTimeout(() => setSuggestions([]), 150)} />{suggestions.length > 0 && <ul className="absolute z-20 mt-1 w-full bg-slate-600 border border-slate-500 rounded-md shadow-lg max-h-40 overflow-y-auto">{suggestions.map(suggestion => <li key={suggestion} onMouseDown={() => handleSuggestionClick(suggestion)} className="px-3 py-2 cursor-pointer text-white hover:bg-slate-500">{suggestion}</li>)}</ul>}</div></div><div className="grid grid-cols-2 gap-4"><div><label htmlFor="wager" className="block text-sm font-medium text-slate-300">Wager ($)</label><input type="number" name="wager" id="wager" value={formData.wager} onChange={handleChange} step="any" required className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"/></div><div><label htmlFor="win" className="block text-sm font-medium text-slate-300">Win ($)</label><input type="number" name="win" id="win" value={formData.win} onChange={handleChange} step="any" required className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"/></div></div></div><div className="mt-8 flex justify-end gap-3"><button type="button" onClick={onClose} className="py-2 px-4 bg-slate-600 hover:bg-slate-500 text-white font-semibold rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-opacity-75 transition-colors">Cancel</button><button type="submit" className="py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 transition-colors">Save Slip</button></div></form>
+            </div>
+        </div>
+    );
+};
+
+const BulkEditModal = ({ isOpen, onClose, onSave, cappers }) => {
+    const [field, setField] = useState('capper'); const [capperValue, setCapperValue] = useState(cappers[0] || ''); const [openValue, setOpenValue] = useState(true);
+    const handleSubmit = (e) => { e.preventDefault(); onSave({ field, value: field === 'capper' ? capperValue : openValue }); onClose(); };
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"><div className="bg-slate-800 rounded-lg shadow-xl p-6 w-full max-w-sm m-4"><h2 className="text-2xl font-bold text-white mb-6">Bulk Edit Slips</h2><form onSubmit={handleSubmit}><div className="space-y-4"><div><label htmlFor="field" className="block text-sm font-medium text-slate-300">Field to Update</label><select id="field" value={field} onChange={(e) => setField(e.target.value)} className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"><option value="capper">Capper</option><option value="open">Open/Closed Status</option></select></div>{field === 'capper' && <div><label htmlFor="capperValue" className="block text-sm font-medium text-slate-300">New Capper</label><input type="text" id="capperValue" value={capperValue} onChange={(e) => setCapperValue(e.target.value)} list="capper-options" required className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"/><datalist id="capper-options">{cappers.map(c => <option key={c} value={c} />)}</datalist></div>}{field === 'open' && <div><label className="block text-sm font-medium text-slate-300">New Status</label><div className="mt-2 flex gap-4"><label className="flex items-center gap-2 cursor-pointer"><input type="radio" name="openStatus" checked={openValue === true} onChange={() => setOpenValue(true)} className="h-4 w-4 bg-slate-700 border-slate-500 text-blue-600 focus:ring-blue-500"/><span className="text-sm font-medium text-slate-300">Open</span></label><label className="flex items-center gap-2 cursor-pointer"><input type="radio" name="openStatus" checked={openValue === false} onChange={() => setOpenValue(false)} className="h-4 w-4 bg-slate-700 border-slate-500 text-blue-600 focus:ring-blue-500"/><span className="text-sm font-medium text-slate-300">Closed</span></label></div></div>}</div><div className="mt-8 flex justify-end gap-3"><button type="button" onClick={onClose} className="py-2 px-4 bg-slate-600 hover:bg-slate-500 text-white font-semibold rounded-lg shadow-md">Cancel</button><button type="submit" className="py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md">Apply Changes</button></div></form></div></div>
+    );
+};
+
+const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message }) => {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"><div className="bg-slate-800 rounded-lg shadow-xl p-6 w-full max-w-sm m-4"><h2 className="text-xl font-bold text-white mb-4">{title}</h2><p className="text-slate-300 mb-6">{message}</p><div className="flex justify-end gap-3"><button type="button" onClick={onClose} className="py-2 px-4 bg-slate-600 hover:bg-slate-500 text-white font-semibold rounded-lg shadow-md">Cancel</button><button type="button" onClick={onConfirm} className="py-2 px-4 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md">Confirm</button></div></div></div>
+    );
+};
+
+const UndoToast = ({ message, onUndo, isVisible }) => {
+    if (!isVisible) return null;
+    return (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-700 text-white py-3 px-6 rounded-lg shadow-2xl flex items-center gap-6 z-50 animate-fade-in-up"><span>{message}</span><button onClick={onUndo} className="font-bold text-blue-400 hover:text-blue-300 transition-colors">Undo</button></div>
+    );
+};
+
+const SetupScreen = ({ onConfigSave, error }) => {
+    const [appsScriptUrl, setAppsScriptUrl] = useState('');
+    const [sheetUrl, setSheetUrl] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+        onConfigSave({ appsScriptUrl, sheetUrl });
+    };
+    const appsScriptCode = `
+const SHEET_NAME = 'Slips';
+const HEADER = [['id', 'date', 'open', 'slip', 'capper', 'wager', 'win']];
+
+function createJsonResponse(data) {
+  return ContentService.createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doGet(e) {
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = spreadsheet.getSheetByName(SHEET_NAME);
+    if (!sheet) {
+      sheet = spreadsheet.insertSheet(SHEET_NAME);
+      sheet.getRange(1, 1, 1, HEADER[0].length).setValues(HEADER);
+      return createJsonResponse({ status: 'success', data: HEADER });
+    }
+    
+    if (sheet.getLastRow() === 0) {
+      sheet.getRange(1, 1, 1, HEADER[0].length).setValues(HEADER);
+      return createJsonResponse({ status: 'success', data: HEADER });
+    }
+
+    const data = sheet.getDataRange().getValues();
+    return createJsonResponse({ status: 'success', data: data });
+
+  } catch (err) {
+    return createJsonResponse({ status: 'error', message: err.message, stack: err.stack });
+  }
+}
+
+function doPost(e) {
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = spreadsheet.getSheetByName(SHEET_NAME);
+    if (!sheet) {
+       throw new Error(\`Sheet named '\${SHEET_NAME}' not found. Please ensure it exists.\`);
+    }
+    const request = JSON.parse(e.postData.contents);
+
+    if (request.action === 'SYNC') {
+      sheet.clearContents();
+      const dataToWrite = HEADER.concat(request.payload);
+      if (dataToWrite.length > 0) {
+        sheet.getRange(1, 1, dataToWrite.length, HEADER[0].length).setValues(dataToWrite);
+      }
+      return createJsonResponse({ status: 'success', message: 'Sheet synced successfully' });
+    }
+    
+    throw new Error('Invalid action specified.');
+    
+  } catch (err) {
+    return createJsonResponse({ status: 'error', message: err.message, stack: err.stack });
+  }
+}
+`.trim();
+
+    return (
+        <div className="flex flex-col items-center justify-center min-h-screen p-4 text-white">
+            <div className="w-full max-w-4xl bg-slate-800 p-8 rounded-lg shadow-2xl">
+                <h1 className="text-3xl font-bold mb-4 text-center text-blue-400">Welcome to Cloud DFS Dashboard</h1>
+                <p className="text-slate-400 mb-8 text-center">To get started, you need to connect the dashboard to your own Google Sheet. Please follow the steps below.</p>
+                
+                <div className="space-y-6 text-slate-300">
+                    <div>
+                        <h2 className="text-xl font-semibold mb-2 text-white">Step 1: Create a New Google Sheet</h2>
+                        <p>Go to <a href="https://sheets.new" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">sheets.new</a> to create a new, blank spreadsheet. The required 'Slips' tab will be created for you automatically when you connect the app.</p>
+                    </div>
+
+                    <div>
+                        <h2 className="text-xl font-semibold mb-2 text-white">Step 2: Create the API Script</h2>
+                        <p>In your new sheet, click <code className="bg-slate-700 px-1 rounded">Extensions &gt; Apps Script</code>. Delete any existing code and paste the code below:</p>
+                        <pre className="bg-slate-900 text-slate-300 p-3 rounded-md mt-2 text-xs overflow-x-auto">{appsScriptCode}</pre>
+                    </div>
+
+                    <div>
+                        <h2 className="text-xl font-semibold mb-2 text-white">Step 3: Deploy the Script</h2>
+                        <ul className="list-disc list-inside space-y-1">
+                            <li>Click the blue <code className="bg-slate-700 px-1 rounded">Deploy</code> button, then <code className="bg-slate-700 px-1 rounded">New deployment</code>.</li>
+                            <li>Click the gear icon next to "Select type", and select <code className="bg-slate-700 px-1 rounded">Web app</code>.</li>
+                            <li>For "Who has access", you <strong>MUST</strong> select <code className="bg-slate-700 px-1 rounded">Anyone</code>.</li>
+                            <li className="flex items-start gap-2 mt-2 p-3 bg-yellow-900/50 text-yellow-300 rounded-md text-sm">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.21 3.03-1.742 3.03H4.42c-1.532 0-2.492-1.696-1.742-3.03l5.58-9.92zM10 13a1 1 0 110-2 1 1 0 010 2zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                                <span>This is the most common point of failure. If this is not set to "Anyone", the application will not be able to connect and you will see a "failed to fetch" error.</span>
+                            </li>
+                            <li>Click <code className="bg-slate-700 px-1 rounded">Deploy</code>. You will need to authorize the script's permissions.</li>
+                            <li>After deploying, copy the <code className="bg-slate-700 px-1 rounded">Web app URL</code>.</li>
+                        </ul>
+                    </div>
+                     <div>
+                        <h2 className="text-xl font-semibold mb-2 text-white">Step 4: Connect to the Dashboard</h2>
+                        <p>Paste your Web App URL and the URL of your Google Sheet into the fields below.</p>
+                        {error && <p className="text-red-400 bg-red-900/50 p-3 rounded-md my-4 text-sm">{error}</p>}
+                        <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+                             <div>
+                                <label htmlFor="appsScriptUrl" className="block text-sm font-medium text-slate-300">Apps Script Web App URL</label>
+                                <input type="url" id="appsScriptUrl" value={appsScriptUrl} onChange={(e) => setAppsScriptUrl(e.target.value)} required placeholder="https://script.google.com/macros/s/..." className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500" />
+                            </div>
+                             <div>
+                                <label htmlFor="sheetUrl" className="block text-sm font-medium text-slate-300">Google Sheet URL</label>
+                                <input type="url" id="sheetUrl" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} required placeholder="https://docs.google.com/spreadsheets/d/..." className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500" />
+                            </div>
+                            <button type="submit" disabled={isSubmitting} className="w-full py-3 px-6 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-md disabled:bg-green-800 disabled:cursor-wait">
+                                {isSubmitting ? 'Connecting...' : 'Save & Connect'}
+                            </button>
+                        </form>
+                        <p className="text-xs text-slate-500 mt-2 text-center">
+                            Troubleshooting: Seeing a "failed to fetch" error? Please double-check that your script is deployed correctly and that "Who has access" is set to "Anyone". You may need to create a new deployment after making changes.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
+// --- Main App Component ---
+const App = () => {
+  const [slips, setSlips] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [config, setConfig] = useState({ appsScriptUrl: null, sheetUrl: null });
+
+  // --- App State ---
+  const [selectedCappers, setSelectedCappers] = useState([]);
+  const [selectedMonths, setSelectedMonths] = useState([]);
+  const [openFilter, setOpenFilter] = useState('all');
+  const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'descending' });
+  const [isSlipEditorOpen, setIsSlipEditorOpen] = useState(false);
+  const [slipToEdit, setSlipToEdit] = useState(null);
+  const [selectedSlipIds, setSelectedSlipIds] = useState(new Set());
+  const [isBulkEditModalOpen, setIsBulkEditModalOpen] = useState(false);
+  const [slipIdToDelete, setSlipIdToDelete] = useState(null);
+  const [isBulkDeleteConfirmOpen, setIsBulkDeleteConfirmOpen] = useState(false);
+  
+  // --- Undo State ---
+  const [previousSlips, setPreviousSlips] = useState(null);
+  const [undoAction, setUndoAction] = useState(null);
+  const undoTimeoutRef = useRef(null);
+
+  const loadData = useCallback(async (url) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await googleSheetsService.getSheetData(url);
+      setSlips(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An unknown error occurred.');
+      setConfig({ appsScriptUrl: null, sheetUrl: null });
+      localStorage.removeItem('dfs-dashboard-config');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const savedConfig = localStorage.getItem('dfs-dashboard-config');
+      if (savedConfig) {
+        const parsedConfig = JSON.parse(savedConfig);
+        setConfig(parsedConfig);
+        if (parsedConfig.appsScriptUrl) {
+          loadData(parsedConfig.appsScriptUrl);
+        } else { setIsLoading(false); }
+      } else { setIsLoading(false); }
+    } catch (e) {
+      console.error("Failed to parse config from localStorage", e);
+      setIsLoading(false);
+    }
+  }, [loadData]);
+
+  const handleConfigSave = (newConfig) => {
+    localStorage.setItem('dfs-dashboard-config', JSON.stringify(newConfig));
+    setConfig(newConfig);
+    loadData(newConfig.appsScriptUrl);
+  };
+  
+  const handleLogout = () => {
+    localStorage.removeItem('dfs-dashboard-config');
+    setConfig({ appsScriptUrl: null, sheetUrl: null });
+    setSlips([]);
+    setError(null);
+  };
+
+  const cappers = useMemo(() => [...new Set(slips.map(s => s.capper).filter(Boolean))].sort(), [slips]);
+
+  const { monthOptions, monthLabelToValueMap } = useMemo(() => {
+    const monthSet = new Set();
+    slips.forEach(s => { 
+        if(s.date instanceof Date && !isNaN(s.date.getTime())) { 
+            // Use UTC month to be consistent
+            monthSet.add(`${s.date.getUTCFullYear()}-${s.date.getUTCMonth()}`); 
+        } 
+    });
+    const monthArray = Array.from(monthSet).map(m => { 
+        const [year, monthIndex] = m.split('-'); 
+        // Create date as UTC
+        const date = new Date(Date.UTC(parseInt(year, 10), parseInt(monthIndex, 10)));
+        return { 
+            value: m, 
+            label: date.toLocaleString('default', { month: 'long', year: 'numeric', timeZone: 'UTC' }) 
+        }; 
+    });
+    monthArray.sort((a,b) => { 
+        const [bYear, bMonth] = b.value.split('-').map(Number); 
+        const [aYear, aMonth] = a.value.split('-').map(Number); 
+        return new Date(Date.UTC(bYear, bMonth)).getTime() - new Date(Date.UTC(aYear, aMonth)).getTime(); 
+    });
+    const monthOptions = monthArray.map(m => m.label);
+    const monthLabelToValueMap = new Map(monthArray.map(m => [m.label, m.value]));
+    return { monthOptions, monthLabelToValueMap };
+  }, [slips]);
+
+  const filteredAndSortedSlips = useMemo(() => {
+    let filtered = [...slips];
+    if (openFilter === 'open') {
+      filtered = filtered.filter(s => s.open);
+    }
+    if (selectedCappers.length > 0) filtered = filtered.filter(s => selectedCappers.includes(s.capper));
+    if (selectedMonths.length > 0) {
+      const selectedMonthValues = selectedMonths.map(label => monthLabelToValueMap.get(label));
+      filtered = filtered.filter(s => {
+        if (!(s.date instanceof Date) || isNaN(s.date.getTime())) return false;
+        // Use UTC month for filtering
+        const slipMonthValue = `${s.date.getUTCFullYear()}-${s.date.getUTCMonth()}`;
+        return selectedMonthValues.includes(slipMonthValue);
+      });
+    }
+    const { key, direction } = sortConfig; const dir = direction === 'ascending' ? 1 : -1;
+    filtered.sort((a, b) => { let comparison = 0; const aVal = a[key]; const bVal = b[key]; if (aVal instanceof Date && bVal instanceof Date) comparison = aVal.getTime() - bVal.getTime(); else if (typeof aVal === 'string' && typeof bVal === 'string') comparison = aVal.localeCompare(bVal); else { if (aVal < bVal) comparison = -1; if (aVal > bVal) comparison = 1; } if (comparison !== 0) return comparison * dir; if (b.date.getTime() !== a.date.getTime()) return b.date.getTime() - a.date.getTime(); return b.id - a.id; });
+    return filtered;
+  }, [slips, openFilter, selectedCappers, selectedMonths, sortConfig, monthLabelToValueMap]);
+
+  const stats = useMemo(() => {
+    const relevantSlips = filteredAndSortedSlips.filter(s => !s.open);
+    const totalWagered = relevantSlips.reduce((acc, s) => acc + s.wager, 0);
+    const totalNet = relevantSlips.reduce((acc, s) => acc + s.net, 0);
+    const roi = totalWagered > 0 ? (totalNet / totalWagered) * 100 : 0;
+    const wins = relevantSlips.filter(s => s.net > 0).length;
+    const totalSlips = relevantSlips.length;
+    const winRate = totalSlips > 0 ? (wins / totalSlips) * 100 : 0;
+    return { totalWagered, totalNet, roi, wins, totalSlips, winRate };
+  }, [filteredAndSortedSlips]);
+
+  const openSlipsCount = useMemo(() => slips.filter(s => s.open).length, [slips]);
+
+  const triggerUndo = useCallback((actionMessage, prevSlips) => {
+    setUndoAction(actionMessage); setPreviousSlips(prevSlips); if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+    undoTimeoutRef.current = window.setTimeout(() => { setUndoAction(null); setPreviousSlips(null); }, 7000);
+  }, []);
+
+  const persistChanges = useCallback(async (newSlips, undoMessage) => {
+    if (!config.appsScriptUrl) { setError("App is not configured. Please set up your Google Sheets connection."); return; }
+    const originalSlips = slips; setSlips(newSlips);
+    try { await googleSheetsService.syncSheetData(config.appsScriptUrl, newSlips); triggerUndo(undoMessage, originalSlips); }
+    catch(err) { setSlips(originalSlips); setError(err instanceof Error ? err.message : 'Failed to save changes to Google Sheets.'); }
+  }, [config.appsScriptUrl, slips, triggerUndo]);
+
+  const handleSaveSlip = useCallback(async (slipData) => {
+    const isEdit = slips.some(s => s.id === slipData.id); const net = slipData.open ? 0 : slipData.win - slipData.wager; const updatedSlip = { ...slipData, net };
+    const newSlips = isEdit ? slips.map(s => s.id === updatedSlip.id ? updatedSlip : s) : [...slips, updatedSlip];
+    await persistChanges(newSlips, isEdit ? 'Slip updated.' : 'Slip added.');
+  }, [slips, persistChanges]);
+  
+  const handleConfirmRemoveSlip = useCallback(async () => { if (slipIdToDelete === null) return; const newSlips = slips.filter(s => s.id !== slipIdToDelete); await persistChanges(newSlips, 'Slip deleted.'); setSlipIdToDelete(null); }, [slipIdToDelete, slips, persistChanges]);
+  const handleConfirmBulkDelete = useCallback(async () => { const newSlips = slips.filter(s => !selectedSlipIds.has(s.id)); await persistChanges(newSlips, `${selectedSlipIds.size} slip${selectedSlipIds.size > 1 ? 's' : ''} deleted.`); setSelectedSlipIds(new Set()); setIsBulkDeleteConfirmOpen(false); }, [selectedSlipIds, slips, persistChanges]);
+  const handleSaveBulkEdit = useCallback(async ({ field, value }) => { const newSlips = slips.map(s => { if (selectedSlipIds.has(s.id)) { const updatedSlip = { ...s, [field]: value }; if (field === 'open' && value === false) { updatedSlip.net = updatedSlip.win - updatedSlip.wager; } else if (field === 'open' && value === true) { updatedSlip.net = 0; } return updatedSlip; } return s; }); await persistChanges(newSlips, `${selectedSlipIds.size} slip${selectedSlipIds.size > 1 ? 's' : ''} updated.`); setSelectedSlipIds(new Set()); }, [selectedSlipIds, slips, persistChanges]);
+  const handleUndo = useCallback(async () => { if (!previousSlips || !config.appsScriptUrl) return; setSlips(previousSlips); await googleSheetsService.syncSheetData(config.appsScriptUrl, previousSlips); setUndoAction(null); setPreviousSlips(null); if (undoTimeoutRef.current) { clearTimeout(undoTimeoutRef.current); undoTimeoutRef.current = null; } }, [previousSlips, config.appsScriptUrl]);
+  const requestSort = useCallback((key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'ascending' ? 'descending' : 'ascending' })), []);
+  const handleResetFilters = useCallback(() => { setSelectedCappers([]); setSelectedMonths([]); setOpenFilter('all'); setSortConfig({ key: 'date', direction: 'descending' }); setSelectedSlipIds(new Set()); }, []);
+  const handleOpenAddModal = useCallback(() => { setSlipToEdit(null); setIsSlipEditorOpen(true); }, []);
+  const handleOpenEditModal = useCallback((slip) => { setSlipToEdit(slip); setIsSlipEditorOpen(true); }, []);
+  const handleRequestRemoveSlip = useCallback((slipId) => { setSlipIdToDelete(slipId); }, []);
+  const handleToggleSelection = useCallback((id) => setSelectedSlipIds(prev => { const newSet = new Set(prev); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); return newSet; }), []);
+  const handleToggleSelectAll = useCallback(() => setSelectedSlipIds(prev => { const allVisibleIds = filteredAndSortedSlips.map(s => s.id); const allVisibleSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => prev.has(id)); const newSet = new Set(prev); if (allVisibleSelected) allVisibleIds.forEach(id => newSet.delete(id)); else allVisibleIds.forEach(id => newSet.add(id)); return newSet; }), [filteredAndSortedSlips]);
+  useEffect(() => () => { if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current) }, []);
+
+  if (isLoading) return <div className="flex items-center justify-center min-h-screen text-slate-400 text-lg">Loading Dashboard...</div>;
+  if (!config.appsScriptUrl) return <SetupScreen onConfigSave={handleConfigSave} error={error} />;
+
+  return (
+    <div className="min-h-screen bg-slate-900 text-white font-sans p-4 sm:p-6 lg:p-8">
+      <main className="max-w-7xl mx-auto space-y-8">
+        <header className="flex flex-wrap justify-between items-center gap-4">
+          <h1 className="text-4xl sm:text-5xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-cyan-400">DFS Dashboard</h1>
+          <div className="flex items-center gap-4 bg-slate-800 p-2 rounded-lg">
+             <a href={config.sheetUrl ?? '#'} target="_blank" rel="noopener noreferrer" className="text-sm text-slate-300 hover:text-white" title="Open Google Sheet">Connected Sheet</a>
+             <button onClick={handleLogout} className="text-sm bg-slate-600 hover:bg-slate-500 text-white font-medium py-1 px-3 rounded-md" title="Disconnect Sheet">Close</button>
+          </div>
+        </header>
+        
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <StatCard title="Total Net Profit" value={formatCurrency(stats.totalNet)} valueColor={stats.totalNet >= 0 ? 'text-green-400' : 'text-red-400'} />
+            <StatCard title="Return on Investment (ROI)" value={`${stats.roi.toFixed(2)}%`} valueColor={stats.roi >= 0 ? 'text-green-400' : 'text-red-400'} />
+            <StatCard title="Slips Won (Closed)" value={`${stats.wins} / ${stats.totalSlips}`} />
+            <StatCard title="Win Rate (Closed)" value={`${stats.winRate.toFixed(2)}%`} />
+        </section>
+
+        <section className="bg-slate-800 rounded-lg p-4 shadow-lg flex flex-wrap items-center justify-between gap-4">
+            {selectedSlipIds.size > 0 ? (
+                <div className="flex w-full flex-wrap items-center gap-4"><span className="font-semibold text-slate-100">{selectedSlipIds.size} slip{selectedSlipIds.size > 1 ? 's' : ''} selected</span><button onClick={() => setIsBulkEditModalOpen(true)} className="text-sm text-white bg-blue-600 hover:bg-blue-700 font-medium py-2 px-4 rounded-lg">Bulk Edit</button><button onClick={() => setIsBulkDeleteConfirmOpen(true)} className="text-sm text-white bg-red-600 hover:bg-red-700 font-medium py-2 px-4 rounded-lg">Bulk Delete</button><button onClick={() => setSelectedSlipIds(new Set())} className="text-sm text-slate-300 hover:text-white font-medium py-2 px-4 rounded-lg">Clear Selection</button></div>
+            ) : (
+                <>
+                    <div className="flex flex-wrap items-center gap-4">
+                        <MultiSelectDropdown label="Cappers" options={cappers} selectedOptions={selectedCappers} onChange={setSelectedCappers} />
+                        <MultiSelectDropdown label="Months" options={monthOptions} selectedOptions={selectedMonths} onChange={setSelectedMonths} />
+                        <button onClick={handleResetFilters} className="text-sm text-slate-300 hover:text-white bg-slate-700/50 hover:bg-slate-700 font-medium py-2 px-4 rounded-lg">Reset Filters</button>
+
+                        <button onClick={handleOpenAddModal} className="text-sm text-white bg-blue-600 hover:bg-blue-700 font-medium py-2 px-4 rounded-lg">Add New Slip</button>
+                    </div>
+                    <div className="flex items-center bg-slate-700 rounded-lg p-1">
+                        <button onClick={() => setOpenFilter('all')} className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${openFilter === 'all' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-600'}`}>All Slips</button>
+                        <button onClick={() => setOpenFilter('open')} className={`relative px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${openFilter === 'open' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-600'}`}>
+                            Open Slips
+                            {openSlipsCount > 0 && (
+                                <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-yellow-500 text-xs font-bold text-yellow-900 ring-2 ring-slate-800">
+                                    {openSlipsCount}
+                                </span>
+                            )}
+                        </button>
+                    </div>
+                </>
+            )}
+        </section>
+
+        <BettingTable slips={filteredAndSortedSlips} sortConfig={sortConfig} onSort={requestSort} onEdit={handleOpenEditModal} onRemove={handleRequestRemoveSlip} selectedSlipIds={selectedSlipIds} onToggleSelection={handleToggleSelection} onToggleSelectAll={handleToggleSelectAll} />
+      </main>
+      
+      <SlipEditorModal isOpen={isSlipEditorOpen} onClose={() => setIsSlipEditorOpen(false)} onSave={handleSaveSlip} slip={slipToEdit} cappers={cappers} />
+      <BulkEditModal isOpen={isBulkEditModalOpen} onClose={() => setIsBulkEditModalOpen(false)} onSave={handleSaveBulkEdit} cappers={cappers} />
+      <ConfirmationModal isOpen={slipIdToDelete !== null} onClose={() => setSlipIdToDelete(null)} onConfirm={handleConfirmRemoveSlip} title="Delete Slip" message="Are you sure you want to permanently delete this slip?" />
+      <ConfirmationModal isOpen={isBulkDeleteConfirmOpen} onClose={() => setIsBulkDeleteConfirmOpen(false)} onConfirm={handleConfirmBulkDelete} title="Bulk Delete Slips" message={`Are you sure you want to permanently delete the ${selectedSlipIds.size} selected slips?`} />
+      <UndoToast isVisible={!!undoAction} message={undoAction} onUndo={handleUndo} />
+    </div>
+  );
+};
+
+// --- Entry Point ---
+const rootElement = document.getElementById('root');
+if (!rootElement) throw new Error("Could not find root element to mount to");
+const root = ReactDOM.createRoot(rootElement);
+root.render(<StrictMode><App /></StrictMode>);
+    </script>
+</body>
+</html>
+```
